@@ -1,0 +1,145 @@
+### microservices-demo — manual smoke tests
+# Run with the IntelliJ HTTP Client or the VS Code REST Client extension.
+# Start discovery-server first, then product-service, order-service and api-gateway,
+# and give the clients a few seconds to fetch the Eureka registry.
+
+@gateway = http://localhost:8080
+@eureka = http://localhost:8761
+@productService = http://localhost:8081
+@orderService = http://localhost:8082
+
+### Eureka: every registered instance
+GET {{eureka}}/eureka/apps
+Accept: application/json
+
+> {%
+    client.test("registry answers", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+    });
+%}
+
+### Gateway: the whole catalogue
+GET {{gateway}}/api/products
+Accept: application/json
+
+> {%
+    client.test("five products are returned", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.length === 5, "expected 5 products");
+    });
+    client.global.set("productId", response.body[1].id);
+    client.global.set("unitPrice", response.body[1].price);
+%}
+
+### Gateway: one product, id taken from the previous call
+GET {{gateway}}/api/products/{{productId}}
+Accept: application/json
+
+> {%
+    client.test("the product is found", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.id === parseInt(client.global.get("productId")), "wrong product");
+    });
+%}
+
+### Gateway: unknown product id
+GET {{gateway}}/api/products/99
+Accept: application/json
+
+> {%
+    client.test("an unknown product is a 404", function () {
+        client.assert(response.status === 404, "expected 404, got " + response.status);
+    });
+%}
+
+### Gateway: place an order (order-service calls product-service through OpenFeign)
+POST {{gateway}}/api/orders
+Content-Type: application/json
+
+{
+  "productId": {{productId}},
+  "quantity": 3
+}
+
+> {%
+    client.test("the order is created and priced", function () {
+        client.assert(response.status === 201, "expected 201, got " + response.status);
+        client.assert(response.body.quantity === 3, "wrong quantity");
+        const expected = client.global.get("unitPrice") * 3;
+        client.assert(Math.abs(response.body.totalPrice - expected) < 0.001,
+            "expected a total of " + expected + ", got " + response.body.totalPrice);
+    });
+%}
+
+### Gateway: order for a product that does not exist -> 400
+POST {{gateway}}/api/orders
+Content-Type: application/json
+
+{
+  "productId": 99,
+  "quantity": 1
+}
+
+> {%
+    client.test("an unknown product is rejected", function () {
+        client.assert(response.status === 400, "expected 400, got " + response.status);
+    });
+%}
+
+### Gateway: quantity must be positive -> 400
+POST {{gateway}}/api/orders
+Content-Type: application/json
+
+{
+  "productId": 1,
+  "quantity": 0
+}
+
+> {%
+    client.test("a non positive quantity is rejected", function () {
+        client.assert(response.status === 400, "expected 400, got " + response.status);
+    });
+%}
+
+### Gateway: every order placed since startup
+GET {{gateway}}/api/orders
+Accept: application/json
+
+> {%
+    client.test("orders are listed", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+    });
+%}
+
+### Gateway: discovery locator route, no explicit route needed
+GET {{gateway}}/product-service/products
+Accept: application/json
+
+> {%
+    client.test("the locator route works", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+    });
+%}
+
+### Gateway: a path without the /api prefix is not routed
+GET {{gateway}}/products
+Accept: application/json
+
+> {%
+    client.test("an unmapped path is a 404", function () {
+        client.assert(response.status === 404, "expected 404, got " + response.status);
+    });
+%}
+
+### Direct: product-service, bypassing the gateway
+GET {{productService}}/products
+Accept: application/json
+
+### Direct: order-service, bypassing the gateway
+POST {{orderService}}/orders
+Content-Type: application/json
+
+{
+  "productId": 5,
+  "quantity": 1
+}
