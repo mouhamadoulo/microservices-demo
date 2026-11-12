@@ -1,0 +1,16 @@
+package com.example.orderservice.client;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+
+/**
+ * Declarative client for product-service. The name is the Eureka service id,
+ * so calls are load balanced across every registered instance.
+ */
+@FeignClient(name = "product-service", path = "/products")
+public interface ProductClient {
+
+    @GetMapping("/{id}")
+    ProductResponse findById(@PathVariable("id") Long id);
+}
